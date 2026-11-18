@@ -1,0 +1,163 @@
+# math-driver
+
+A configurable wrapper (driver) around Python's built-in `math` module with **target Python version selection**.  
+Choose which Python version you're targeting (from 3.0 up to 3.15.2) and the driver automatically:
+
+- exposes only functions available in that version;
+- polyfills newer functions on older interpreters when possible;
+- blocks unavailable functions with a clear `UnsupportedInVersion` error;
+- adds input validation, structured errors, and JSON serialization.
+
+## Requirements
+
+- Python 3.7+ (the driver itself runs on any modern Python 3.x)
+- No third-party dependencies
+
+## Installation
+
+Clone the repository and use the module directly:
+
+```bash
+git clone https://github.com/<your-username>/math-driver.git
+cd math-driver
+python math_driver.py --help
+```
+
+Or copy `math_driver.py` into your project and import it.
+
+## Quick start (CLI)
+
+Choose a target version **before** running with `--py`:
+
+```bash
+# List available / blocked functions for a given version
+python math_driver.py --py 3.7  --list
+python math_driver.py --py 3.11 --list
+python math_driver.py --py 3.15.2 --list
+
+# JSON output (useful for tooling)
+python math_driver.py --py 3.12 --list --json
+
+# Evaluate a single expression
+python math_driver.py --py 3.11 -c "sqrt 16"
+python math_driver.py --py 3.9  -c "lcm 12,18,24"
+python math_driver.py --py 3.15.2 -c "sinpi 0.5"
+
+# Start an interactive REPL
+python math_driver.py --py 3.12
+```
+
+Calling a function unavailable in the target version returns a structured error:
+
+```bash
+$ python math_driver.py --py 3.7 -c "cbrt 27"
+{
+  "type": "UnsupportedInVersion",
+  "code": "UNSUPPORTED_IN_VERSION",
+  "operation": "cbrt",
+  "message": "функция 'cbrt' недоступна в Python 3.7.0 (появилась в 3.11.0)",
+  "details": { "...": "..." },
+  "function": "cbrt",
+  "target_version": "3.7.0",
+  "min_version": "3.11.0",
+  "polyfill_available": true
+}
+```
+
+## Quick start (library)
+
+```python
+from math_driver import MathDriver, MathError, UnsupportedInVersion, ErrorCode
+
+md = MathDriver("3.9")
+
+# Introspection
+md.supported()      # ['acos', 'acosh', ..., 'lcm', 'nextafter', 'ulp', ...]
+md.unavailable()    # {'cbrt': ((3, 11, 0), True), 'exp2': ..., ...}
+
+# Direct calls
+md.sqrt(16)         # 4.0
+md.lcm(12, 18, 24)  # 72
+md.hypot(3, 4)      # 5.0
+
+# Generic dispatcher
+md.call("pow", 2, 10)   # 1024.0
+
+# Structured error handling
+try:
+    md.call("cbrt", 27)
+except UnsupportedInVersion as e:
+    print(e.code)               # ErrorCode.UNSUPPORTED_IN_VERSION
+    print(e.function)           # 'cbrt'
+    print(e.min_version)        # '3.11.0'
+    print(e.version_gap())      # (0, 2, 0)
+    print(e.to_dict())          # machine-readable payload
+```
+
+## Feature availability
+
+The driver tracks when each function was introduced:
+
+| Function | Since Python |
+|---|---|
+| `isfinite` | 3.2 |
+| `isclose` | 3.5 |
+| `dist`, `perm`, `comb`, `prod`, `isqrt` | 3.8 |
+| `lcm`, `nextafter`, `ulp` | 3.9 |
+| `cbrt`, `exp2` | 3.11 |
+| `sumprod` | 3.12 |
+| `fma` | 3.13 |
+| `sinpi`, `cospi`, `tanpi` | 3.15 (polyfilled) |
+
+**Polyfills** are available for: `cbrt`, `exp2`, `lcm`, `nextafter`, `sumprod`, `fma`, `ulp`, `sinpi`, `cospi`, `tanpi`.
+
+## Errors
+
+All errors inherit from `MathError` (a `ValueError` subclass) and carry:
+
+- `code` — machine-readable `ErrorCode` enum;
+- `operation` — the operation that failed;
+- `details` — dict with context (arguments, values, etc.);
+- `to_dict()` / `to_json()` for logging and API responses.
+
+`UnsupportedInVersion` additionally exposes `function`, `target_version`, `min_version`, `polyfill_available`, `version_gap()`, and `suggest_version()`.
+
+## Examples
+
+**Guard a script for a specific Python version:**
+
+```python
+import sys
+from math_driver import MathDriver
+
+md = MathDriver(f"{sys.version_info.major}.{sys.version_info.minor}")
+if "cbrt" not in md.supported():
+    print(f"cbrt unavailable on Python {md.target}; using fallback")
+```
+
+**Log errors as JSON for observability:**
+
+```python
+import logging
+from math_driver import MathDriver, MathError
+
+md = MathDriver("3.8")
+try:
+    md.call("log", -1)
+except MathError as e:
+    logging.error("math error: %s", e.to_json())
+```
+
+## CLI reference
+
+| Flag | Description |
+|---|---|
+| `--py`, `-p` | Target Python version (e.g. `3.7`, `3.11`, `3.15.2`) |
+| `--list`, `-l` | Print available and blocked functions |
+| `--call`, `-c` | Evaluate a single expression `"name arg1, arg2, ..."` |
+| `--json`, `-j` | Emit `--list` output as JSON |
+| `--verbose`, `-v` | Enable debug logging |
+
+## License
+
+MIT
